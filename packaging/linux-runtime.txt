@@ -1,0 +1,16 @@
+ConflictBench Linux x86_64 package
+
+Supported package baseline: Ubuntu 24.04 (glibc 2.39), X11 or XWayland.
+Qt 6.11.2 and ICU 73 runtime libraries are included. Native Wayland plugins are
+not included. On a Wayland session, launch with QT_QPA_PLATFORM=xcb if needed.
+No sudo is required to extract or run the application.
+
+Install the system-owned desktop libraries if they are not already present:
+sudo apt-get update
+sudo apt-get install libgl1 libegl1 libopengl0 libfontconfig1 libfreetype6 libdbus-1-3 libx11-6 libx11-xcb1 libxext6 libxrender1 libxcb1 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-render0 libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb-xkb1 libxkbcommon0 libxkbcommon-x11-0 libsm6 libice6
+
+Extract the archive, keep its directory together, and run ./ConflictBench.
+Use ./ConflictBench --smoke-test to run a synthetic, temporary-folder check.
+
+For older distributions, build from source against a supported Qt version.
+Do not copy glibc, graphics drivers, or random library files into this package.

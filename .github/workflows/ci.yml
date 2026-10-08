@@ -1,0 +1,167 @@
+name: Build, safety tests, and installed packages
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: conflictbench-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  sources:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Verify exact corresponding Qt source and extract notices
+        run: python3 packaging/prepare_sources.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qt-corresponding-source
+          path: release-sources/
+          if-no-files-found: error
+          retention-days: 14
+
+  security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan repository history for secrets using verified Gitleaks
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/gitleaks.tar.gz" https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          printf '%s\n' "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git . --redact --report-format json --report-path "$RUNNER_TEMP/gitleaks.json"
+      - name: Check dependency provenance and mapped public vulnerability advisories
+        run: python3 packaging/check_dependencies.py --online
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: security-evidence
+          path: |
+            ${{ runner.temp }}/gitleaks.json
+            dependency-evidence.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  desktop:
+    needs: sources
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - os: macos-15
+            architecture: arm64
+            qt_arch: clang_64
+            qt_archives: qtbase qttools
+            configure: '-G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0'
+          - os: windows-2022
+            architecture: x86_64
+            qt_arch: win64_msvc2022_64
+            qt_archives: qtbase qttools
+            configure: '-G "Visual Studio 17 2022" -A x64'
+          - os: ubuntu-24.04
+            architecture: x86_64
+            qt_arch: linux_gcc_64
+            qt_archives: qtbase qttools icu
+            configure: '-G Ninja -DCMAKE_BUILD_TYPE=Release'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: qt-corresponding-source
+          path: release-sources
+      - name: Install official Qt binary archives
+        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
+        with:
+          version: '6.11.2'
+          arch: ${{ matrix.qt_arch }}
+          archives: ${{ matrix.qt_archives }}
+          aqtversion: '==3.3.0'
+          py7zrversion: '==1.1.0'
+          cache: true
+          cache-key-prefix: conflictbench-qt-base-only
+      - name: Install Linux test display and desktop libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth ninja-build libopengl0 libxcb-cursor0
+      - name: Record actual host and dependency versions
+        shell: bash
+        run: |
+          python -c "import platform; print(platform.platform(), platform.machine()); assert platform.machine().lower() in ('${{ matrix.architecture }}', 'amd64')"
+          cmake --version
+          qmake -query
+      - name: Configure
+        shell: bash
+        run: cmake -S . -B build ${{ matrix.configure }} "-DCMAKE_PREFIX_PATH=$QT_ROOT_DIR" -DBUILD_TESTING=ON
+      - name: Build with bounded concurrency
+        run: cmake --build build --config Release --parallel 2
+      - name: Core and desktop safety tests
+        run: ctest --test-dir build -C Release --output-on-failure --parallel 1 --timeout 120
+      - name: Package and smoke-test extracted application
+        if: runner.os != 'Linux'
+        shell: bash
+        run: python packaging/package.py --qt "$QT_ROOT_DIR"
+      - name: Package and smoke-test extracted Linux application
+        if: runner.os == 'Linux'
+        shell: bash
+        run: xvfb-run -a python packaging/package.py --qt "$QT_ROOT_DIR"
+      - name: Smoke Linux archive in clean Ubuntu with documented dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          docker run --rm -v "$PWD/dist:/packages:ro" -v "$PWD/packaging:/scripts:ro" ubuntu:24.04 bash /scripts/linux_clean_smoke.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: package-${{ matrix.os }}-${{ matrix.architecture }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: test-log-${{ matrix.os }}
+          path: build/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [desktop, security]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: downloaded-artifacts
+      - name: Assemble checked release assets and source
+        run: |
+          python3 packaging/assemble_release.py --artifacts downloaded-artifacts
+          test "$GITHUB_REF_NAME" = "v$(python3 -c 'import re; print(re.search(r"project\(ConflictBench\s+VERSION\s+(\d+\.\d+\.\d+)",open("CMakeLists.txt").read())[1])')"
+      - name: Create draft release for final human review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "ConflictBench $GITHUB_REF_NAME" --notes-file packaging/RELEASE-NOTES.md dist/release/*

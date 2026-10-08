@@ -1,0 +1,46 @@
+{
+  "checked_on": "2026-10-08",
+  "downloaded_source_retained": false,
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/cmprmsd/syncthing-deconflicter/47438c05f7ad949b8062cdba2324c53d23efb638/deconflicter.py",
+      "sha256": "e89de4fcb7fb207c53d9193dfcc8a03d81499523c388e9f9b8a924fa6035dc54",
+      "bytes": 9061
+    },
+    {
+      "url": "https://raw.githubusercontent.com/dlgcy/SyncTrayzorV2/442d88bb157c8f2edc65f96b525b251a22b1e54b/src/SyncTrayzor/Services/Conflicts/ConflictFileManager.cs",
+      "sha256": "d41949e1af2fea2bb9dcb9b2af26b6287581275ebb8285128ecfa783a9a12cfe",
+      "bytes": 15829
+    },
+    {
+      "url": "https://raw.githubusercontent.com/GermanCoding/SyncTrayzor/1344bf89cb8ec1e3f9918e85f71978edf30beb2f/src/SyncTrayzor/Services/Conflicts/ConflictFileManager.cs",
+      "sha256": "adccdd2b65e8941b09026598f6cb1afa0e776e77b937d31e8809e55563c794c8",
+      "bytes": 15836
+    },
+    {
+      "url": "https://raw.githubusercontent.com/GermanCoding/SyncTrayzor/1344bf89cb8ec1e3f9918e85f71978edf30beb2f/src/SyncTrayzor/Pages/ConflictResolution/ConflictResolutionViewModel.cs",
+      "sha256": "de97288f23c3e0d0c51906146dc7e124c6ebe9391945eb0a429e52d29f8ac6ea",
+      "bytes": 8878
+    },
+    {
+      "url": "https://raw.githubusercontent.com/gustjose/obsidian-syncthing-manager/0e1e612982b21a27323e2f62a228689cdcdc6a13/src/services/conflict-manager.ts",
+      "sha256": "8346cde089654cde2f17c2c1687403c5208702559f8e820c9dd668fd9eb19776",
+      "bytes": 1783
+    },
+    {
+      "url": "https://raw.githubusercontent.com/gustjose/obsidian-syncthing-manager/0e1e612982b21a27323e2f62a228689cdcdc6a13/src/ui/conflict-modal.ts",
+      "sha256": "347c05b4c4636ca687ad7a988c143a363a3b95878818c4ba3c9a994989a272da",
+      "bytes": 5520
+    },
+    {
+      "url": "https://raw.githubusercontent.com/dschrempf/syncthing-resolve-conflicts/ee1c5536924e64f9ba8d9a0edd834e37180ed1fa/README.md",
+      "sha256": "7657e550097292df80915fe2395375cfc2f12b66296ef69f67bb80c98273d2b1",
+      "bytes": 2175
+    },
+    {
+      "url": "https://raw.githubusercontent.com/dschrempf/syncthing-resolve-conflicts/ee1c5536924e64f9ba8d9a0edd834e37180ed1fa/syncthing-resolve-conflicts",
+      "sha256": "d7d400e46cf6b6feec3296bc796fa723060c37c5bd4357c4fb6609fb97a419b1",
+      "bytes": 15715
+    }
+  ]
+}

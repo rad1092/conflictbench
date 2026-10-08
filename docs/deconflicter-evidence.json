@@ -1,0 +1,42 @@
+{
+  "upstream_commit": "47438c05f7ad949b8062cdba2324c53d23efb638",
+  "source_sha256": "e89de4fcb7fb207c53d9193dfcc8a03d81499523c388e9f9b8a924fa6035dc54",
+  "host": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "python": "3.14.6",
+  "method": "unchanged AST action/scan bodies; GUI-only callbacks stubbed",
+  "synthetic_temporary_directories_removed": true,
+  "results": [
+    {
+      "scenario": "source_changed_same_size_and_mtime_after_review",
+      "reviewed_sha256": "4a8d8134f29b0b7b60c126f5532bc9f5d9bb73037373cf6fb872d81f1dcefdfd",
+      "written_sha256": "90b4853e06e722c63b4270463cf558684d7a1e77605d3ad36489d6146e42ab87",
+      "result": "unreviewed bytes written; no rejection"
+    },
+    {
+      "scenario": "destination_changed_same_size_and_mtime_after_review",
+      "result": "newer destination bytes overwritten; no rejection"
+    },
+    {
+      "scenario": "accept_base_after_same_size_destination_change",
+      "result": "stale editor bytes restored; conflict deleted; no backup created"
+    },
+    {
+      "scenario": "source_disappears_before_accept_version",
+      "result": "FileNotFoundError after destination truncated to zero bytes"
+    },
+    {
+      "scenario": "accept_binary_base_without_editor_changes",
+      "before_hex": "ff00fe01",
+      "after_hex": "efbfbd00efbfbd01",
+      "result": "UTF-8 replacement characters written; binary bytes changed"
+    },
+    {
+      "scenario": "extensionless_original_scan",
+      "result": "conflict grouped as its own original; README not grouped"
+    },
+    {
+      "scenario": "original_is_symlink_outside_selected_folder",
+      "result": "scan includes original; acceptance writes to symlink target"
+    }
+  ]
+}

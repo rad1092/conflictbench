@@ -1,0 +1,13 @@
+/build*/
+/dist/
+/release-sources/
+/package-work/
+/.venv/
+__pycache__/
+*.pyc
+.DS_Store
+*.user
+*.dmp
+*.core
+/dependency-evidence.json
+

@@ -1,0 +1,114 @@
+{
+  "reviewed_at_utc": "2026-10-08T01:52:06.856522+00:00",
+  "host": "macOS 27.0.1 arm64",
+  "qt": "6.11.2",
+  "scope": "independent synthetic C++ core probes; not packaged GUI or Windows/Linux execution",
+  "source_sha256": {
+    "core.cpp": "d81f9ba4adcd863ae80bb5ef4346d4d5fff79f7d43b18d0cfc2561b100b91674",
+    "core.h": "7db4a354bcd433a38e80e65664451367cd480681e8e9c5b8bb80f2cd94341864"
+  },
+  "earlier_work_in_progress_observations": {
+    "destination_written_later_conflict_deletion": {
+      "deleted_conflict_recreated": false,
+      "error": "Conflict changed before removal stage; undo refused.",
+      "undo_ok": false
+    },
+    "inherited_backup_acl": {
+      "acl_listing": "drwx------@ 5 hdk  staff  160 Oct  8 10:44 <synthetic-fixture>/backup/conflictbench-d191c6ac-9ed6-40f7-93fe-9e11034c6911\n 0: ABCDEFAB-CDEF-ABCD-EFAB-CDEF0000000C inherited allow list,search,readattr,readextattr,readsecurity,file_inherit,directory_inherit\n-rw-------@ 1 hdk  staff    4 Oct  8 10:44 <synthetic-fixture>/backup/conflictbench-d191c6ac-9ed6-40f7-93fe-9e11034c6911/conflict.backup\n 0: ABCDEFAB-CDEF-ABCD-EFAB-CDEF0000000C inherited allow read,execute,readattr,readextattr,readsecurity\n",
+      "chmod_exit": 0,
+      "error": "",
+      "execute_ok": true
+    },
+    "parser_manual_backup": "report.txt.bak",
+    "prepared_later_keep_both_collision": {
+      "error": "Files changed after preparation; recovery refuses to overwrite later changes.",
+      "external_file_still_exists": true,
+      "undo_ok": false
+    },
+    "prepared_later_known_bytes": {
+      "after": "BBBB",
+      "error": "Files changed after preparation; recovery refuses to overwrite later changes.",
+      "execute_ok": false,
+      "undo_ok": false
+    },
+    "receipt_dotdot_scope_escape": {
+      "error": "",
+      "outside_after": "AAAA",
+      "outside_conflict_created": true,
+      "undo_ok": true
+    },
+    "resource_fork": {
+      "backup_fork_size": -1,
+      "conflict_exists": false,
+      "error": "",
+      "execute_ok": true,
+      "fixture_setxattr": 0,
+      "original_fork_size": -1
+    }
+  },
+  "final_snapshot_observations": {
+    "destination_written_later_conflict_deletion": {
+      "deleted_conflict_recreated": false,
+      "error": "Conflict changed before removal stage; undo refused.",
+      "undo_ok": false
+    },
+    "inherited_backup_acl": {
+      "acl_listing": "",
+      "chmod_exit": 0,
+      "error": "Extended directory access-control lists are unsupported: <synthetic-fixture>/backup",
+      "execute_ok": false
+    },
+    "mac_case_alias_backup_inside_root": {
+      "alias_exists": true,
+      "canonical_alias": "<synthetic-fixture>/sync/in-root-backup",
+      "error": "Backup directory must be outside the scanned folder.",
+      "plan_rejected": true
+    },
+    "parser_manual_backup": "",
+    "prepared_later_keep_both_collision": {
+      "error": "Files changed after preparation; recovery refuses to overwrite later changes.",
+      "external_file_still_exists": true,
+      "undo_ok": false
+    },
+    "prepared_later_known_bytes": {
+      "after": "BBBB",
+      "error": "Files changed after preparation; recovery refuses to overwrite later changes.",
+      "execute_ok": false,
+      "undo_ok": false
+    },
+    "receipt_dotdot_scope_escape": {
+      "error": "Malformed or non-normalized receipt path or time.",
+      "outside_after": "BBBB",
+      "outside_conflict_created": false,
+      "undo_ok": false
+    },
+    "resource_fork": {
+      "conflict_exists": true,
+      "conflict_fork_size": 4,
+      "fixture_setxattr": 0,
+      "scan_pairs": 0,
+      "warnings": "Extended attributes/resource forks are unsupported; no files changed: <synthetic-fixture>/sync/report.sync-conflict-20260101-120000-ABCDEFG.txt"
+    },
+    "same_size_same_mtime_destination": {
+      "after": "CCCC",
+      "error": "File changed since review; rescan required: <synthetic-fixture>/sync/report.txt",
+      "execute_ok": false,
+      "mtime_restored": true,
+      "preview_rejected": true
+    },
+    "same_size_same_mtime_source": {
+      "conflict_after": "CCCC",
+      "error": "File changed since review; rescan required: <synthetic-fixture>/sync/report.sync-conflict-20260101-120000-ABCDEFG.txt",
+      "execute_ok": false,
+      "mtime_restored": true,
+      "original_after": "AAAA"
+    },
+    "symlink_swap_after_scan": {
+      "error": "Symbolic links are not supported: <synthetic-fixture>/sync/report.txt",
+      "execute_ok": false,
+      "link_created": true,
+      "outside_after": "SAFE"
+    }
+  },
+  "temporary_source_and_fixture_copies_removed": true
+}
