@@ -53,6 +53,32 @@ bool overwrite(const QString &path, const QByteArray &bytes) {
         && file.write(bytes) == bytes.size();
 }
 
+bool choosePickerPath(QFileDialog *picker, const QString &path) {
+    // On Cocoa, selectFile() can clear the selection while the directory model
+    // initializes. Enter the absolute path through the same field a user edits.
+    auto *entry = picker->findChild<QLineEdit *>("fileNameEdit");
+    if (!entry) { picker->reject(); return false; }
+    picker->setDirectory(QFileInfo(path).absolutePath());
+    entry->setText(QDir::toNativeSeparators(path));
+    QMetaObject::invokeMethod(picker, "accept", Qt::QueuedConnection);
+    return true;
+}
+
+bool captureSyntheticWidget(QWidget &widget, const QString &name) {
+    const QString directory = qEnvironmentVariable("CB_GUI_CAPTURE_DIR");
+    if (directory.isEmpty()) return true;
+    if (!QDir().mkpath(directory)) return false;
+    // This captures only our synthetic QWidget, never another app or desktop.
+    widget.repaint();
+    const QPixmap pixels = widget.grab();
+    const QString file = QDir(directory).filePath(
+        QGuiApplication::platformName() + '-' + name + ".png");
+    const bool saved = !pixels.isNull() && pixels.save(file);
+    if (saved) qInfo() << "Synthetic GUI capture" << QFileInfo(file).fileName()
+                       << pixels.size() << "devicePixelRatio" << pixels.devicePixelRatio();
+    return saved;
+}
+
 // Directory entries and byte hashes prove cancel does not write even a receipt.
 QMap<QString, QByteArray> directorySnapshot(const QString &root) {
     QMap<QString, QByteArray> result;
@@ -78,6 +104,7 @@ struct ReviewObservation {
     bool timedOut = false;
     bool sawWarning = false;
     bool sawInformation = false;
+    bool captureSaved = true;
     QString planText;
     QStringList messages;
 };
@@ -112,6 +139,7 @@ ReviewObservation driveReview(Workbench &window, bool commit,
         observed.controlsPresent = paused && privateBackup && button && planText;
         if (!observed.controlsPresent) { dialog->reject(); return; }
         observed.planText = planText->toPlainText();
+        observed.captureSaved = captureSyntheticWidget(*dialog, "plan");
         observed.initialDisabled = !button->isEnabled();
         paused->setChecked(true);
         observed.pauseOnlyDisabled = !button->isEnabled();
@@ -139,8 +167,11 @@ struct HistoryObservation {
     bool sawHistory = false;
     bool undoInitiallyDisabled = false;
     bool timedOut = false;
+    bool pickerFieldPresent = false;
+    bool captureSaved = true;
     int count = -1;
     QString original;
+    QString selectedPath;
 };
 
 HistoryObservation driveHistory(Workbench &window, const QString &backupRoot) {
@@ -158,9 +189,9 @@ HistoryObservation driveHistory(Workbench &window, const QString &backupRoot) {
         if (auto *picker = qobject_cast<QFileDialog *>(dialog)) {
             if (observed.sawPicker) return;
             observed.sawPicker = true;
-            picker->setDirectory(backupRoot);
-            picker->selectFile(backupRoot);
-            QMetaObject::invokeMethod(picker, "accept", Qt::QueuedConnection);
+            QObject::connect(picker, &QFileDialog::filesSelected, picker,
+                             [&](const QStringList &files) { observed.selectedPath = files.value(0); });
+            observed.pickerFieldPresent = choosePickerPath(picker, backupRoot);
             return;
         }
         if (!dialog || dialog->windowTitle() != "History / recovery") return;
@@ -172,6 +203,7 @@ HistoryObservation driveHistory(Workbench &window, const QString &backupRoot) {
         for (auto *button : dialog->findChildren<QPushButton *>())
             if (button->text() == "Undo / recover selected")
                 observed.undoInitiallyDisabled = !button->isEnabled();
+        observed.captureSaved = captureSyntheticWidget(*dialog, "history");
         dialog->reject();
     });
     timer.start(5);
@@ -186,9 +218,6 @@ class GuiTests final : public QObject {
     Q_OBJECT
 private slots:
     void initTestCase() {
-        // Exercise Qt file-dialog widgets deterministically on every OS. Native
-        // platform pickers and accessibility are covered by manual smoke checks.
-        QApplication::setAttribute(Qt::AA_DontUseNativeDialogs, true);
         QStandardPaths::setTestModeEnabled(true);
     }
 
@@ -221,6 +250,7 @@ private slots:
         QVERIFY(diff->toPlainText().contains("- Saturday: palace at 10:00"));
         QVERIFY(diff->toPlainText().contains("+ Saturday: museum at 11:00"));
         QVERIFY(review->isEnabled() && external->isEnabled());
+        QVERIFY(captureSyntheticWidget(window, "text"));
 
         auto *imageVersion = version(window, "design.png");
         QVERIFY(imageVersion);
@@ -234,6 +264,7 @@ private slots:
         QCOMPARE(rightImage->pixmap().toImage().pixelColor(0, 0), QColor("#74512e"));
         QVERIFY(left->isHidden() && right->isHidden());
         QVERIFY(diff->toPlainText().contains("text diff is unavailable"));
+        QVERIFY(captureSyntheticWidget(window, "image"));
 
         auto *binaryVersion = version(window, "budget.v2.dat");
         QVERIFY(binaryVersion);
@@ -243,6 +274,7 @@ private slots:
         QVERIFY(left->toPlainText().contains("Binary or unsupported text encoding"));
         QVERIFY(right->toPlainText().contains("choose a decision explicitly"));
         QVERIFY(diff->toPlainText().contains("choose explicitly"));
+        QVERIFY(captureSyntheticWidget(window, "binary"));
 
         tree->setCurrentItem(binaryVersion->parent());
         QVERIFY(!review->isEnabled());
@@ -261,6 +293,7 @@ private slots:
         const auto observed = driveReview(window, false);
         QVERIFY(!observed.timedOut);
         QVERIFY(observed.sawPlan && observed.controlsPresent);
+        QVERIFY(observed.captureSaved);
         QVERIFY(observed.initialDisabled);
         QVERIFY(observed.pauseOnlyDisabled);
         QVERIFY(observed.backupOnlyDisabled);
@@ -301,6 +334,7 @@ private slots:
         const auto observed = driveReview(window, true);
         QVERIFY(!observed.timedOut);
         QVERIFY(observed.sawPlan && observed.controlsPresent && observed.bothEnabled);
+        QVERIFY(observed.captureSaved);
         QVERIFY2(observed.sawInformation && observed.messages.join('\n').contains("State: committed"),
                  qPrintable(observed.messages.join('\n')));
         QVERIFY(!QFile::exists(selected.conflict.path));
@@ -319,6 +353,9 @@ private slots:
         const auto displayed = driveHistory(window, demoBackups(root));
         QVERIFY(!displayed.timedOut);
         QVERIFY(displayed.sawPicker && displayed.sawHistory);
+        QVERIFY(displayed.pickerFieldPresent && displayed.captureSaved);
+        QCOMPARE(QFileInfo(displayed.selectedPath).canonicalFilePath(),
+                 QFileInfo(demoBackups(root)).canonicalFilePath());
         QCOMPARE(displayed.count, 1);
         QCOMPARE(displayed.original, QString::fromUtf8("여행 계획.txt"));
         QVERIFY(displayed.undoInitiallyDisabled);
@@ -352,6 +389,53 @@ private slots:
         QCOMPARE(contents(original), bytes);
     }
 
+    void committingLastScanEntryRescansWithoutStaleSelection() {
+        Workbench window;
+        window.show();
+        window.createDemo();
+        const QString root = demoRoot(window);
+        const auto scanned = scan(root);
+        QVERIFY2(scanned.error.isEmpty(), qPrintable(scanned.error));
+        QCOMPARE(scanned.pairs.size(), 3);
+        const int lastIndex = scanned.pairs.size() - 1;
+        const auto selected = scanned.pairs.last();
+        auto *tree = named<QTreeWidget>(window, "conflicts");
+        QVERIFY(tree);
+        QTreeWidgetItem *lastVersion = nullptr;
+        QTreeWidgetItemIterator item(tree);
+        while (*item) {
+            if ((*item)->parent() && (*item)->data(0, Qt::UserRole).toInt() == lastIndex)
+                lastVersion = *item;
+            ++item;
+        }
+        QVERIFY(lastVersion);
+        tree->setCurrentItem(lastVersion);
+        auto *decision = named<QComboBox>(window, "decision");
+        QVERIFY(decision);
+        decision->setCurrentIndex(0);
+        auto expected = directorySnapshot(root);
+        QCOMPARE(expected.remove(QDir(root).relativeFilePath(selected.conflict.path)), 1);
+
+        const auto observed = driveReview(window, true);
+        QVERIFY(!observed.timedOut && observed.sawPlan && observed.controlsPresent);
+        QVERIFY(observed.captureSaved);
+        QVERIFY2(observed.sawInformation && observed.messages.join('\n').contains("State: committed"),
+                 qPrintable(observed.messages.join('\n')));
+        QCOMPARE(directorySnapshot(root), expected);
+        QCOMPARE(scan(root).pairs.size(), 2);
+        QCOMPARE(tree->topLevelItemCount(), 2);
+        const auto receipts = history(demoBackups(root));
+        QCOMPARE(receipts.size(), 1);
+        QCOMPARE(receipts.first().originalPath, selected.original.path);
+        // The removed item had index 2 while the new scan has only indices 0/1.
+        // Clearing the old tree must not preview its stale index in the new scan.
+        QVERIFY(tree->currentItem());
+        QVERIFY(tree->currentItem()->parent());
+        const int nextIndex = tree->currentItem()->data(0, Qt::UserRole).toInt();
+        QVERIFY(nextIndex >= 0 && nextIndex < 2);
+        QVERIFY(named<QPushButton>(window, "reviewPlan")->isEnabled());
+    }
+
     void changeDuringReviewRefusesCommit() {
         Workbench window;
         window.show();
@@ -366,6 +450,7 @@ private slots:
         const auto observed = driveReview(window, true, [&] { mutationWritten = overwrite(original, changed); });
         QVERIFY(mutationWritten);
         QVERIFY(!observed.timedOut && observed.sawPlan);
+        QVERIFY(observed.captureSaved);
         QVERIFY2(observed.sawWarning && observed.messages.join('\n').contains("rescan required"),
                  qPrintable(observed.messages.join('\n')));
         QVERIFY(!observed.messages.join('\n').contains("State: committed"));
@@ -433,7 +518,9 @@ private slots:
         bool sawPicker = false;
         bool sawArguments = false;
         bool sawFailure = false;
+        bool pickerFieldPresent = false;
         bool timedOut = false;
+        QString selectedProgram;
         QStringList messages;
         QTimer timer;
         QElapsedTimer elapsed;
@@ -448,9 +535,9 @@ private slots:
             if (auto *picker = qobject_cast<QFileDialog *>(dialog)) {
                 if (sawPicker) return;
                 sawPicker = true;
-                picker->setDirectory(toolFolder.path());
-                picker->selectFile(program);
-                QMetaObject::invokeMethod(picker, "accept", Qt::QueuedConnection);
+                QObject::connect(picker, &QFileDialog::filesSelected, picker,
+                                 [&](const QStringList &files) { selectedProgram = files.value(0); });
+                pickerFieldPresent = choosePickerPath(picker, program);
             } else if (auto *message = qobject_cast<QMessageBox *>(dialog)) {
                 messages << message->windowTitle() + ": " + message->text();
                 // macOS intentionally ignores QMessageBox window titles.
@@ -466,11 +553,19 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(sawFailure || timedOut, 16000);
         timer.stop();
         QVERIFY(!timedOut);
-        QVERIFY(sawPicker && sawArguments);
+        QVERIFY(sawPicker && sawArguments && pickerFieldPresent);
+        QCOMPARE(QFileInfo(selectedProgram).canonicalFilePath(), QFileInfo(program).canonicalFilePath());
         QVERIFY2(sawFailure, qPrintable(messages.join('\n')));
         QCOMPARE(directorySnapshot(demoParent), before);
     }
 };
 
-QTEST_MAIN(GuiTests)
+int main(int argc, char **argv) {
+    // Select deterministic Qt file-dialog widgets before Cocoa initializes its
+    // integration. The main windows still use the native platform plugin.
+    QApplication::setAttribute(Qt::AA_DontUseNativeDialogs, true);
+    QApplication application(argc, argv);
+    GuiTests tests;
+    return QTest::qExec(&tests, argc, argv);
+}
 #include "gui_tests.moc"

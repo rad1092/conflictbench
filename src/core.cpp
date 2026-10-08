@@ -19,6 +19,7 @@
 #ifdef Q_OS_WIN
 #define NOMINMAX
 #include <windows.h>
+#include <winternl.h>
 #include <sddl.h>
 #include <aclapi.h>
 #include <io.h>
@@ -33,6 +34,7 @@
 #endif
 
 namespace conflictbench {
+namespace detail { void ensurePrivateLockDirectory(const QString &path); }
 namespace {
 const auto privateFile = QFileDevice::ReadOwner | QFileDevice::WriteOwner;
 struct Failure { QString message; };
@@ -134,12 +136,24 @@ QByteArray nativeMetadata(const QString &path) {
     const DWORD attrs = GetFileAttributesW(reinterpret_cast<LPCWSTR>(path.utf16()));
     constexpr DWORD unsupported = FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_OFFLINE | FILE_ATTRIBUTE_ENCRYPTED | FILE_ATTRIBUTE_COMPRESSED | FILE_ATTRIBUTE_SPARSE_FILE | FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM | 0x00040000 | 0x00400000;
     require(attrs != INVALID_FILE_ATTRIBUTES && !(attrs & unsupported), "File has unsupported Windows attributes (hidden/system, streams, encryption, sparse, cloud or compressed): " + path);
-    const HANDLE identity = CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    const HANDLE identity = CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()), FILE_READ_ATTRIBUTES | FILE_READ_EA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
     require(identity != INVALID_HANDLE_VALUE, "Cannot inspect Windows file identity.");
     BY_HANDLE_FILE_INFORMATION identityInfo{};
     const bool identityOk = GetFileInformationByHandle(identity, &identityInfo);
+    // FindFirstStreamW enumerates $DATA streams, not NTFS extended attributes.
+    // FileEaInformation (7) returns FILE_EA_INFORMATION::EaSize. Resolve only
+    // the already loaded system ntdll; no DLL search or extra privilege is used.
+    using QueryInformation = NTSTATUS (NTAPI *)(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG, FILE_INFORMATION_CLASS);
+    const HMODULE native = GetModuleHandleW(L"ntdll.dll");
+    const auto query = native ? reinterpret_cast<QueryInformation>(GetProcAddress(native, "NtQueryInformationFile")) : nullptr;
+    struct EaInformation { ULONG size; } ea{};
+    IO_STATUS_BLOCK io{};
+    const bool eaInspected = query && query(identity, &io, &ea, sizeof(ea), static_cast<FILE_INFORMATION_CLASS>(7)) == 0 &&
+                             io.Status == 0 && io.Information == sizeof(ea);
     CloseHandle(identity);
     require(identityOk && identityInfo.nNumberOfLinks == 1, "Hard-linked files are unsupported: " + path);
+    require(eaInspected, "Cannot inspect Windows extended attributes; no files changed: " + path);
+    require(ea.size == 0, "Windows extended attributes (including WSL metadata) are unsupported; no files changed: " + path);
     WIN32_FIND_STREAM_DATA stream{};
     const HANDLE search = FindFirstStreamW(reinterpret_cast<LPCWSTR>(path.utf16()), FindStreamInfoStandard, &stream, 0);
     if (search == INVALID_HANDLE_VALUE) require(GetLastError() == ERROR_HANDLE_EOF, "Cannot inspect file streams; local NTFS/ReFS files are required: " + path);
@@ -242,7 +256,8 @@ void privateMkdir(const QString &path) {
     require(tokenOk, "Cannot determine current Windows account.");
     LPWSTR sid = nullptr;
     require(ConvertSidToStringSidW(reinterpret_cast<TOKEN_USER *>(bytes.data())->User.Sid, &sid), "Cannot determine Windows account SID.");
-    const QString sddl = QStringLiteral("D:P(A;OICI;FA;;;%1)").arg(QString::fromWCharArray(sid));
+    // An elevated token may otherwise default the owner to Administrators.
+    const QString sddl = QStringLiteral("O:%1D:P(A;OICI;FA;;;%1)").arg(QString::fromWCharArray(sid));
     LocalFree(sid);
     PSECURITY_DESCRIPTOR sd = nullptr;
     require(ConvertStringSecurityDescriptorToSecurityDescriptorW(reinterpret_cast<LPCWSTR>(sddl.utf16()), SDDL_REVISION_1, &sd, nullptr), "Cannot create private backup permissions.");
@@ -380,8 +395,7 @@ std::unique_ptr<QLockFile> lockTransactions(const Options &o) {
     directory = QFileInfo(directory).canonicalFilePath();
     safePath(directory);
     directory = QDir(directory).filePath("conflictbench-locks");
-    if (!QFileInfo::exists(directory)) privateMkdir(directory);
-    safeDirectory(directory);
+    detail::ensurePrivateLockDirectory(directory);
     auto lock = std::make_unique<QLockFile>(QDir(directory).filePath("transactions.lock"));
     lock->setStaleLockTime(0);
     require(lock->tryLock(0), "Another ConflictBench transaction is active, or the local lock is unavailable.");
@@ -441,18 +455,96 @@ Snapshot backupSnapshot(const QString &path, const Snapshot &expected, const Opt
 }
 } // namespace
 
+namespace detail {
+// Internal bootstrap, separated from backup creation so an ACL on the system
+// application-data parent does not force us to weaken backup/source policy.
+void ensurePrivateLockDirectory(const QString &path) {
+    safePath(path, true);
+    if (!QFileInfo::exists(path)) {
+#ifdef Q_OS_WIN
+        privateMkdir(path); // Creates an explicit protected per-user DACL.
+#else
+        const QByteArray name = QFile::encodeName(path);
+        require(::mkdir(name.constData(), 0700) == 0, "Cannot create private lock directory: " + path);
+        const int fd = ::open(name.constData(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+        bool secured = fd >= 0;
+        if (fd >= 0) {
+#ifdef Q_OS_MACOS
+            acl_t empty = acl_init(0);
+            secured = empty && acl_set_fd(fd, empty) == 0;
+            if (empty) acl_free(empty);
+#else
+            // Only this newly created directory is changed. Remove both the
+            // inherited access ACL and a default ACL that would affect its lock.
+            for (const char *attribute : {"system.posix_acl_access", "system.posix_acl_default"}) {
+                const int removed = ::fremovexattr(fd, attribute);
+                if (removed != 0 && errno != ENODATA && errno != ENOTSUP) secured = false;
+            }
+#endif
+            secured = ::fchmod(fd, 0700) == 0 && secured;
+            ::close(fd);
+        }
+        if (!secured) {
+            // This is our new empty directory; never recurse or remove content.
+            ::rmdir(name.constData());
+            require(false, "Cannot secure newly created lock directory: " + path);
+        }
+#endif
+    }
+    safeDirectory(path);
+#ifdef Q_OS_WIN
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    PSID owner = nullptr;
+    PACL dacl = nullptr;
+    const DWORD securityResult = GetNamedSecurityInfoW(const_cast<LPWSTR>(reinterpret_cast<LPCWSTR>(path.utf16())), SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION, &owner, nullptr, &dacl, nullptr, &descriptor);
+    HANDLE token = nullptr;
+    QByteArray tokenData;
+    bool tokenOk = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token);
+    if (tokenOk) {
+        DWORD bytes = 0;
+        GetTokenInformation(token, TokenUser, nullptr, 0, &bytes);
+        tokenData.resize(bytes);
+        tokenOk = bytes > 0 && GetTokenInformation(token, TokenUser, tokenData.data(), bytes, &bytes);
+        CloseHandle(token);
+    }
+    SECURITY_DESCRIPTOR_CONTROL control = 0; DWORD revision = 0;
+    ACL_SIZE_INFORMATION aclInfo{}; void *rawAce = nullptr;
+    bool privateAccess = securityResult == ERROR_SUCCESS && tokenOk && owner && dacl && IsValidAcl(dacl) &&
+            GetSecurityDescriptorControl(descriptor, &control, &revision) && (control & SE_DACL_PROTECTED) &&
+            GetAclInformation(dacl, &aclInfo, sizeof(aclInfo), AclSizeInformation) && aclInfo.AceCount == 1 && GetAce(dacl, 0, &rawAce);
+    if (privateAccess) {
+        const auto user = reinterpret_cast<const TOKEN_USER *>(tokenData.constData())->User.Sid;
+        const auto ace = static_cast<const ACCESS_ALLOWED_ACE *>(rawAce);
+        privateAccess = EqualSid(owner, user) && ace->Header.AceType == ACCESS_ALLOWED_ACE_TYPE &&
+                !(ace->Header.AceFlags & INHERIT_ONLY_ACE) && (ace->Mask & FILE_ALL_ACCESS) == FILE_ALL_ACCESS &&
+                EqualSid(const_cast<DWORD *>(&ace->SidStart), user);
+    }
+    if (descriptor) LocalFree(descriptor);
+    require(privateAccess, "Existing lock directory is not private to the current account: " + path);
+#else
+    struct stat st{};
+    require(::lstat(QFile::encodeName(path).constData(), &st) == 0 && S_ISDIR(st.st_mode) &&
+            st.st_uid == ::geteuid() && (st.st_mode & 0777) == 0700,
+            "Lock directory must be owned by the current account with mode 0700: " + path);
+    noDirectoryAcl(path);
+#endif
+}
+} // namespace detail
+
 QString originalNameForConflict(const QString &name) {
     // Syncthing inserts the marker before filepath.Ext (the final extension).
     static const QRegularExpression pattern(QStringLiteral("^(.*)\\.sync-conflict-([0-9]{8})-([0-9]{6})-([A-Z2-7]{7})(\\.[^./\\\\]*)?$"));
     const auto match = pattern.match(name);
     if (!match.hasMatch() || !QDate::fromString(match.captured(2), "yyyyMMdd").isValid() || !QTime::fromString(match.captured(3), "HHmmss").isValid()) return {};
     const QString original = match.captured(1) + match.captured(5);
+    const QString controlName = original.toLower();
     static const QRegularExpression unsafe(QStringLiteral("[\\x00-\\x1f\\x7f<>:\"/\\\\|?*]"));
     static const QRegularExpression reserved(QStringLiteral("^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\\.|$)"), QRegularExpression::CaseInsensitiveOption);
     if (original.isEmpty() || original == "." || original == ".." || original.endsWith('.') || original.endsWith(' ') ||
         unsafe.match(original).hasMatch() || unsafe.match(name).hasMatch() || reserved.match(original).hasMatch() ||
-        original == ".stignore" || original == ".stfolder" || original == ".stversions" ||
-        original.startsWith(".syncthing.") || original.startsWith("~syncthing~")) return {};
+        controlName == ".stignore" || controlName == ".stfolder" || controlName == ".stversions" ||
+        controlName.startsWith(".syncthing.") || controlName.startsWith("~syncthing~")) return {};
     return original;
 }
 QString actionName(Action action) {

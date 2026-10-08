@@ -8,6 +8,15 @@
 #include <functional>
 using namespace conflictbench;
 namespace {
+class FitImageLabel final : public QLabel {
+    QPixmap image_;
+    void fit() { if(!image_.isNull()) QLabel::setPixmap(image_.scaled(contentsRect().size(), Qt::KeepAspectRatio, Qt::SmoothTransformation)); }
+public:
+    FitImageLabel() { setMinimumSize(1,1); setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Ignored); setAlignment(Qt::AlignCenter); }
+    void setImage(const QImage &image) { image_=QPixmap::fromImage(image); fit(); }
+protected:
+    void resizeEvent(QResizeEvent *event) override { QLabel::resizeEvent(event); fit(); }
+};
 template<class T, class F> T work(QWidget *owner, const QString &title, F operation) {
     // Qt's worker pool keeps hashing and file operations away from the UI thread.
     // https://doc.qt.io/qt-6.8/qtconcurrentrun.html
@@ -37,7 +46,7 @@ QPlainTextEdit *editor(const QString &name) {
 }
 QString metadata(const Snapshot &s) {
     return QString("%1\n%2 bytes · %3 UTC\nSHA-256 %4")
-        .arg(QFileInfo(s.path).fileName()).arg(s.size)
+        .arg(QFileInfo(s.path).fileName().size()>28 ? QFileInfo(s.path).fileName().left(20)+"…"+QFileInfo(s.path).fileName().right(7) : QFileInfo(s.path).fileName()).arg(s.size)
         .arg(s.modifiedUtc.toString("yyyy-MM-dd HH:mm:ss")).arg(QString::fromLatin1(s.sha256.toHex().left(24))+"…");
 }
 bool textContent(const QByteArray &b, QString *out) {
@@ -78,6 +87,13 @@ Workbench::Workbench(QWidget *parent) : QMainWindow(parent) {
     open->setShortcut(QKeySequence::Open);
     button("Try &demo","demo",[this]{createDemo();});
     button("&History / recovery…","history",[this]{historyDialog();});
+    button("Scan details…","scanDetails",[this]{
+        QDialog dialog(this); dialog.setWindowTitle("Scan details"); dialog.resize(720,440);
+        auto *layout=new QVBoxLayout(&dialog); auto *details=editor("Scan details");
+        details->setPlainText(scan_.root+"\n\n"+(scan_.warnings.isEmpty()?"No skipped-file warnings in the latest scan.":scan_.warnings.join("\n")));
+        layout->addWidget(details); auto *close=new QDialogButtonBox(QDialogButtonBox::Close); layout->addWidget(close);
+        connect(close,&QDialogButtonBox::rejected,&dialog,&QDialog::reject); dialog.exec();
+    });
     bar->addStretch(); button("&Guide","guide",[this]{help();}); layout->addLayout(bar);
     folder_=label("No folder selected. Try the demo using disposable files, or open one local folder."); folder_->setObjectName("folderPath"); layout->addWidget(folder_);
     auto *split=new QSplitter;
@@ -89,7 +105,7 @@ Workbench::Workbench(QWidget *parent) : QMainWindow(parent) {
         auto *box=new QGroupBox(name); auto *col=new QVBoxLayout(box);
         *info=label(); (*info)->setAccessibleName(name+" metadata"); col->addWidget(*info);
         *text=editor(name+" text preview"); col->addWidget(*text,1);
-        *img=label(); (*img)->setAlignment(Qt::AlignCenter); (*img)->setAccessibleName(name+" image preview"); (*img)->hide(); col->addWidget(*img,1); columns->addWidget(box,1);
+        *img=new FitImageLabel; (*img)->setAlignment(Qt::AlignCenter); (*img)->setAccessibleName(name+" image preview"); (*img)->hide(); col->addWidget(*img,1); columns->addWidget(box,1);
     };
     previewColumn("Original",&leftInfo_,&leftText_,&leftImage_);
     previewColumn("Conflict",&rightInfo_,&rightText_,&rightImage_);
@@ -106,7 +122,8 @@ Workbench::Workbench(QWidget *parent) : QMainWindow(parent) {
 void Workbench::closeEvent(QCloseEvent *e) {if(busy_) {e->ignore();return;}QMainWindow::closeEvent(e);}
 int Workbench::pairIndex() const {
     auto *item=tree_->currentItem(); if(!item || !item->data(0,Qt::UserRole).isValid())return -1;
-    return item->data(0,Qt::UserRole).toInt();
+    const int index=item->data(0,Qt::UserRole).toInt();
+    return index>=0 && index<scan_.pairs.size() ? index : -1;
 }
 void Workbench::scanFolder(const QString &folder) {
     if(busy_)return;
@@ -115,6 +132,7 @@ void Workbench::scanFolder(const QString &folder) {
     auto result=work<ScanResult>(this,"Scanning local conflict files…",[&](const Options &o){return scan(folder,o);});
     busy_=false; centralWidget()->setEnabled(true);
     if(!result.error.isEmpty()) {QMessageBox::warning(this,"Scan stopped",result.error);return;}
+    QSignalBlocker treeSignals(tree_);
     scan_=result; tree_->clear(); folder_->setText(scan_.root);
     QMap<QString,QTreeWidgetItem*> groups;
     for(int i=0;i<scan_.pairs.size();++i) {
@@ -122,11 +140,14 @@ void Workbench::scanFolder(const QString &folder) {
         if(!groups.contains(p.original.path)) {auto *g=new QTreeWidgetItem(tree_,{QDir(scan_.root).relativeFilePath(p.original.path)}); groups.insert(p.original.path,g);g->setExpanded(true);}
         auto *item=new QTreeWidgetItem(groups[p.original.path],{QFileInfo(p.conflict.path).fileName()});item->setData(0,Qt::UserRole,i);item->setToolTip(0,p.conflict.path);
     }
-    if(!scan_.pairs.isEmpty())tree_->setCurrentItem(tree_->topLevelItem(0)->child(0));else showPair();
-    status_->setText(QString("%1 conflict version(s) in %2 group(s). %3").arg(scan_.pairs.size()).arg(groups.size()).arg(scan_.warnings.isEmpty()?"Choose a version to review.":scan_.warnings.join(" · ")));
+    if(!scan_.pairs.isEmpty())tree_->setCurrentItem(tree_->topLevelItem(0)->child(0));
+    treeSignals.unblock();
+    showPair();
+    status_->setText(QString("%1 conflict version(s) in %2 group(s). %3").arg(scan_.pairs.size()).arg(groups.size()).arg(scan_.warnings.isEmpty()?"Choose a version to review.":QString("%1 skipped-file warning(s); open Scan details.").arg(scan_.warnings.size())));
 }
 void Workbench::createDemo() {
-    if(busy_)return; demo_=std::make_unique<QTemporaryDir>(QDir::tempPath()+"/conflictbench-demo-XXXXXX");
+    if(busy_)return;
+    demo_=std::make_unique<QTemporaryDir>(QDir::tempPath()+"/conflictbench-demo-XXXXXX");
     if(!demo_->isValid()) {QMessageBox::warning(this,"Demo","Cannot create temporary demo folder.");return;}
     const QString demoPath=QFileInfo(demo_->path()).canonicalFilePath();
     QString root=demoPath+"/Synced demo"; QDir().mkpath(root+"/.stfolder");QDir().mkpath(demoPath+"/Backups");
@@ -144,7 +165,8 @@ void Workbench::createDemo() {
     status_->setText("DEMO · Disposable files and backups. They are removed when the app closes. All three decisions and undo can be tried here.");
 }
 void Workbench::showPair() {
-    if(busy_)return; int index=pairIndex();review_->setEnabled(index>=0);external_->setEnabled(index>=0);
+    if(busy_)return;
+    int index=pairIndex();review_->setEnabled(index>=0);external_->setEnabled(index>=0);
     leftInfo_->clear();rightInfo_->clear();leftText_->clear();rightText_->clear();diff_->clear();leftImage_->hide();rightImage_->hide();leftText_->show();rightText_->show();
     if(index<0)return;
     auto pair=scan_.pairs[index];leftInfo_->setText(metadata(pair.original));rightInfo_->setText(metadata(pair.conflict));
@@ -156,14 +178,15 @@ void Workbench::showPair() {
     if(!previews.first.error.isEmpty() || !previews.second.error.isEmpty()) {diff_->setPlainText(previews.first.error+"\n"+previews.second.error+"\nReopen the folder to scan again.");review_->setEnabled(false);external_->setEnabled(false);return;}
     QString left,right;bool leftIsText=textContent(previews.first.bytes,&left),rightIsText=textContent(previews.second.bytes,&right);
     auto render=[&](const Preview &p,bool isText,const QString &text,QPlainTextEdit *edit,QLabel *img) {
-        if(isText){edit->setPlainText(text+(p.truncated?"\n[Preview truncated at 1 MiB]":""));return;}
+        if(isText){edit->setLineWrapMode(QPlainTextEdit::NoWrap);edit->setPlainText(text+(p.truncated?"\n[Preview truncated at 1 MiB]":""));return;}
         // Decode only a bounded image; malformed/huge inputs fall back to metadata.
         QBuffer buffer;buffer.setData(p.bytes);buffer.open(QIODevice::ReadOnly);QImageReader reader(&buffer);QImageReader::setAllocationLimit(32);
         QSize size=reader.size();
         if(!p.truncated && size.isValid() && qint64(size.width())*size.height()<=16000000) {
-            reader.setScaledSize(size.scaled(600,400,Qt::KeepAspectRatio));QImage image=reader.read();
-            if(!image.isNull()){img->setPixmap(QPixmap::fromImage(image));img->show();edit->hide();return;}
+            reader.setScaledSize(size.boundedTo(QSize(1200,800)));QImage image=reader.read();
+            if(!image.isNull()){static_cast<FitImageLabel*>(img)->setImage(image);img->show();edit->hide();return;}
         }
+        edit->setLineWrapMode(QPlainTextEdit::WidgetWidth);
         edit->setPlainText("Binary or unsupported text encoding.\n\nUse metadata or an external viewer to inspect it, then choose a decision explicitly.\n\nNo automatic winner is inferred from size or date.");
     };
     render(previews.first,leftIsText,left,leftText_,leftImage_);render(previews.second,rightIsText,right,rightText_,rightImage_);

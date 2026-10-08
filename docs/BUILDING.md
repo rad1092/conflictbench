@@ -94,6 +94,8 @@ Qt account or use the commercial installer. Pip resolves some transitive build
 tool dependencies, so the workflow is repeatable by declared versions but is not
 a fully hermetic build.
 
+Qt 6.11 changed the Windows archive layout. The Windows job uses the small [pinned direct downloader](QT-WINDOWS-INSTALL.md) for official Qtbase/Qttools archives; macOS/Linux continue through aqt. No account or commercial installer is used.
+
 Each desktop job builds with at most two compiler processes, runs CTest, packages,
 and tests an extracted application. The Linux job additionally launches the
 archive in a clean container with only documented system dependencies. Logs,

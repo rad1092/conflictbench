@@ -6,6 +6,8 @@ A local desktop workbench for reviewing Syncthing conflict files before resolvin
 
 No account, Syncthing API key, daemon, telemetry, or automatic winner. ConflictBench is independent of the Syncthing project.
 
+![ConflictBench native macOS demo](docs/screenshots/cocoa-text.png)
+
 ## Start
 
 Download your platform package from [Releases](https://github.com/rad1092/conflictbench/releases). Extract it and open **ConflictBench**. The packages are unsigned and macOS is not notarized. Verify the published SHA-256 checksum first. Linux runtime requirements and build instructions are in [BUILDING](docs/BUILDING.md).

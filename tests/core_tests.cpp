@@ -10,14 +10,18 @@
 #include <QTemporaryDir>
 #include <QtTest>
 #include <cstdlib>
+#include <cstring>
+#include <cerrno>
 #ifdef Q_OS_WIN
 #define NOMINMAX
 #include <windows.h>
+#include <winternl.h>
 #include <sddl.h>
 #include <aclapi.h>
 #endif
 #ifndef Q_OS_WIN
 #include <unistd.h>
+#include <sys/stat.h>
 #include <sys/xattr.h>
 #ifdef Q_OS_MACOS
 #include <sys/acl.h>
@@ -25,8 +29,36 @@
 #endif
 
 using namespace conflictbench;
+// Internal bootstrap accepts only a directory, keeping production lock-path
+// selection fixed while allowing isolated filesystem-policy tests.
+namespace conflictbench::detail { void ensurePrivateLockDirectory(const QString &path); }
 namespace {
 #ifdef Q_OS_WIN
+bool setSyntheticEa(const QString &path) {
+    using SetEa = NTSTATUS (NTAPI *)(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG);
+    const HMODULE native = GetModuleHandleW(L"ntdll.dll");
+    const auto setEa = native ? reinterpret_cast<SetEa>(GetProcAddress(native, "NtSetEaFile")) : nullptr;
+    if (!setEa) return false;
+    const HANDLE file = CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()), FILE_WRITE_EA,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                    nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return false;
+    const QByteArray name("CONFLICTBENCH_TEST");
+    const QByteArray value("synthetic metadata");
+    // Documented FILE_FULL_EA_INFORMATION layout: fixed 8-byte prefix,
+    // null-terminated name followed immediately by the value.
+    struct EaHeader { ULONG next; UCHAR flags; UCHAR nameLength; USHORT valueLength; };
+    static_assert(sizeof(EaHeader) == 8);
+    const EaHeader header{0, 0, static_cast<UCHAR>(name.size()), static_cast<USHORT>(value.size())};
+    QByteArray bytes(sizeof(header) + name.size() + 1 + value.size(), '\0');
+    std::memcpy(bytes.data(), &header, sizeof(header));
+    std::memcpy(bytes.data() + sizeof(header), name.constData(), name.size());
+    std::memcpy(bytes.data() + sizeof(header) + name.size() + 1, value.constData(), value.size());
+    IO_STATUS_BLOCK io{};
+    const bool ok = setEa(file, &io, bytes.data(), static_cast<ULONG>(bytes.size())) == 0 && io.Status == 0;
+    CloseHandle(file);
+    return ok;
+}
 QString currentSid() {
     HANDLE token = nullptr; if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return {};
     DWORD size = 0; GetTokenInformation(token, TokenUser, nullptr, 0, &size); QByteArray data(size, '\0');
@@ -99,6 +131,9 @@ private slots:
         QTest::newRow("windows-stream") << "file:stream.sync-conflict-20261008-120000-ABCDEFG.txt" << "";
         QTest::newRow("control") << "file\nname.sync-conflict-20261008-120000-ABCDEFG.txt" << "";
         QTest::newRow("syncthing-control") << ".sync-conflict-20261008-120000-ABCDEFG.stignore" << "";
+        QTest::newRow("syncthing-control-uppercase") << ".sync-conflict-20261008-120000-ABCDEFG.STIGNORE" << "";
+        QTest::newRow("syncthing-temporary-uppercase") << ".SYNCTHING.file.sync-conflict-20261008-120000-ABCDEFG.tmp" << "";
+        QTest::newRow("syncthing-legacy-temporary-uppercase") << "~SYNCTHING~file.sync-conflict-20261008-120000-ABCDEFG.tmp" << "";
     }
     void parser() { QFETCH(QString, input); QFETCH(QString, expected); QCOMPARE(originalNameForConflict(input), expected); }
     void unicodePairAndBoundedPreview() {
@@ -258,6 +293,58 @@ private slots:
         QSKIP("Darwin inherited ACL regression; Windows private DACL is created explicitly.");
 #endif
     }
+    void lockBootstrapClearsOnlyNewDirectoryAcl() {
+#ifdef Q_OS_WIN
+        QSKIP("POSIX inherited ACL bootstrap regression; Windows uses a protected DACL.");
+#else
+        Fixture f; const QString parent = QDir(f.base).filePath("application-data");
+        QVERIFY(QDir().mkdir(parent));
+        const QByteArray parentName = QFile::encodeName(parent);
+#ifdef Q_OS_MACOS
+        QCOMPARE(QProcess::execute("/bin/chmod", {"+a", "everyone allow read,execute,readattr,readextattr,readsecurity,file_inherit,directory_inherit", parent}), 0);
+        auto readParentAcl = [&] {
+            acl_t acl = acl_get_file(parentName.constData(), ACL_TYPE_EXTENDED);
+            if (!acl) return QByteArray();
+            char *text = acl_to_text(acl, nullptr); const QByteArray result = text ? QByteArray(text) : QByteArray();
+            if (text) acl_free(text); acl_free(acl); return result;
+        };
+#else
+        // Linux POSIX ACL xattr version 2: default user/group/other rwx.
+        const auto inherited = QByteArray::fromHex("0200000001000700ffffffff04000700ffffffff20000700ffffffff");
+        QVERIFY(::setxattr(parentName.constData(), "system.posix_acl_default", inherited.constData(), inherited.size(), 0) == 0);
+        auto readParentAcl = [&] {
+            const auto count = ::getxattr(parentName.constData(), "system.posix_acl_default", nullptr, 0);
+            if (count <= 0) return QByteArray();
+            QByteArray value(count, '\0');
+            return ::getxattr(parentName.constData(), "system.posix_acl_default", value.data(), value.size()) == count ? value : QByteArray();
+        };
+#endif
+        const QByteArray before = readParentAcl(); QVERIFY(!before.isEmpty());
+        const QString lockDirectory = QDir(parent).filePath("conflictbench-locks");
+        try { detail::ensurePrivateLockDirectory(lockDirectory); }
+        catch (...) { QFAIL("New lock directory could not be secured beneath an ACL-bearing parent."); }
+        QCOMPARE(readParentAcl(), before);
+        struct stat st{}; QVERIFY(::lstat(QFile::encodeName(lockDirectory).constData(), &st) == 0);
+        QCOMPARE(st.st_mode & 0777, mode_t(0700)); QCOMPARE(st.st_uid, ::geteuid());
+#ifdef Q_OS_MACOS
+        acl_t childAcl = acl_get_file(QFile::encodeName(lockDirectory).constData(), ACL_TYPE_EXTENDED);
+        if (childAcl) { acl_entry_t entry; const int first = acl_get_entry(childAcl, ACL_FIRST_ENTRY, &entry); acl_free(childAcl); QCOMPARE(first, -1); }
+        else QCOMPARE(errno, ENOENT);
+#else
+        for (const char *attribute : {"system.posix_acl_access", "system.posix_acl_default"}) {
+            QCOMPARE(::getxattr(QFile::encodeName(lockDirectory).constData(), attribute, nullptr, 0), ssize_t(-1));
+            QCOMPARE(errno, ENODATA);
+        }
+#endif
+        // Reusing a verified private directory is permitted; existing broader
+        // directories are refused without changing their ACL or mode.
+        try { detail::ensurePrivateLockDirectory(lockDirectory); }
+        catch (...) { QFAIL("An existing private lock directory was rejected."); }
+        bool refused = false;
+        try { detail::ensurePrivateLockDirectory(parent); } catch (...) { refused = true; }
+        QVERIFY(refused); QCOMPARE(readParentAcl(), before);
+#endif
+    }
     void interruptedTransactionsRecover_data() {
         QTest::addColumn<QString>("stage"); QTest::addColumn<int>("action");
         QTest::newRow("backup-write") << "copy_chunk" << 1;
@@ -352,6 +439,45 @@ private slots:
         QVERIFY(::link(QFile::encodeName(f.original).constData(), QFile::encodeName(other).constData()) == 0);
 #endif
         const auto s = scan(f.root); QVERIFY(s.pairs.isEmpty()); QVERIFY(!s.warnings.isEmpty()); QCOMPARE(get(other), QByteArray("old version\n"));
+    }
+    void windowsLockBootstrapKeepsProtectedPerUserAcl() {
+#ifdef Q_OS_WIN
+        Fixture f; const QString parent = QDir(f.base).filePath("application-data"); QVERIFY(QDir().mkdir(parent));
+        const QString sid = currentSid(); QVERIFY(!sid.isEmpty());
+        QVERIFY(setDacl(parent, "D:P(A;OICI;FA;;;" + sid + ")(A;OICI;GR;;;WD)"));
+        const auto parentAcl = securityText(parent); QVERIFY(!parentAcl.isEmpty());
+        const QString directory = QDir(parent).filePath("conflictbench-locks");
+        try { detail::ensurePrivateLockDirectory(directory); }
+        catch (...) { QFAIL("New Windows lock directory could not be made private."); }
+        QCOMPARE(securityText(parent), parentAcl);
+        const auto privateAcl = securityText(directory); QVERIFY(!privateAcl.isEmpty()); QVERIFY(!privateAcl.contains(";;;WD)"));
+        try { detail::ensurePrivateLockDirectory(directory); }
+        catch (...) { QFAIL("Existing protected Windows lock directory was rejected."); }
+        QVERIFY(setDacl(directory, "D:P(A;OICI;FA;;;" + sid + ")(A;OICI;GR;;;WD)"));
+        const auto broadAcl = securityText(directory);
+        bool refused = false; try { detail::ensurePrivateLockDirectory(directory); } catch (...) { refused = true; }
+        QVERIFY(refused); QCOMPARE(securityText(directory), broadAcl); QCOMPARE(securityText(parent), parentAcl);
+#else
+        QSKIP("Windows protected per-user lock DACL test runs in Windows CI.");
+#endif
+    }
+    void windowsExtendedAttributesRefused() {
+#ifdef Q_OS_WIN
+        for (const bool onOriginal : {false, true}) {
+            Fixture f;
+            QVERIFY(setSyntheticEa(onOriginal ? f.original : f.conflict));
+            const auto s = scan(f.root); QVERIFY(s.pairs.isEmpty()); QVERIFY(s.warnings.join('\n').contains("extended attributes"));
+            QCOMPARE(get(f.original), QByteArray("old version\n")); QCOMPARE(get(f.conflict), QByteArray("new version\n"));
+            QVERIFY(QDir(f.backups).entryList(QDir::Dirs | QDir::NoDotAndDotDot).isEmpty());
+            Fixture later; const auto p = later.planned(); QVERIFY(p.error.isEmpty());
+            QVERIFY(setSyntheticEa(onOriginal ? later.original : later.conflict));
+            const auto r = execute(p, true); QVERIFY(!r.ok); QVERIFY(r.receiptPath.isEmpty());
+            QVERIFY(r.error.contains("extended attributes"));
+            QCOMPARE(get(later.original), QByteArray("old version\n")); QCOMPARE(get(later.conflict), QByteArray("new version\n"));
+        }
+#else
+        QSKIP("NTFS extended attribute checks run in Windows CI.");
+#endif
     }
     void windowsJunctionAndNativePermissions() {
 #ifdef Q_OS_WIN
