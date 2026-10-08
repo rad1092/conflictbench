@@ -8,6 +8,7 @@
 #include <functional>
 using namespace conflictbench;
 namespace {
+constexpr qint64 inlinePreviewBytes = 1024 * 1024;
 class FitImageLabel final : public QLabel {
     QPixmap image_;
     void fit() { if(!image_.isNull()) QLabel::setPixmap(image_.scaled(contentsRect().size(), Qt::KeepAspectRatio, Qt::SmoothTransformation)); }
@@ -110,6 +111,7 @@ Workbench::Workbench(QWidget *parent) : QMainWindow(parent) {
     previewColumn("Original",&leftInfo_,&leftText_,&leftImage_);
     previewColumn("Conflict",&rightInfo_,&rightText_,&rightImage_);
     tabs_->addTab(versions,"&Versions"); diff_=editor("Text difference"); tabs_->addTab(diff_,"&Text difference"); split->addWidget(tabs_); split->setStretchFactor(1,1); split->setSizes({280,860}); layout->addWidget(split,1);
+    comparisonScope_=label(); comparisonScope_->setObjectName("comparisonScope"); comparisonScope_->setAccessibleName("Comparison scope"); comparisonScope_->hide(); layout->addWidget(comparisonScope_);
     auto *decision=new QHBoxLayout;
     auto *actionLabel=label("&Decision:"); action_=new QComboBox; action_->setObjectName("decision"); action_->setAccessibleName("Resolution decision");
     action_->addItems({"Keep original · archive conflict","Use conflict · replace original","Keep both · give conflict a new name"});
@@ -167,18 +169,18 @@ void Workbench::createDemo() {
 void Workbench::showPair() {
     if(busy_)return;
     int index=pairIndex();review_->setEnabled(index>=0);external_->setEnabled(index>=0);
-    leftInfo_->clear();rightInfo_->clear();leftText_->clear();rightText_->clear();diff_->clear();leftImage_->hide();rightImage_->hide();leftText_->show();rightText_->show();
+    leftInfo_->clear();rightInfo_->clear();leftText_->clear();rightText_->clear();diff_->clear();leftImage_->hide();rightImage_->hide();leftText_->show();rightText_->show();comparisonScope_->clear();comparisonScope_->hide();
     if(index<0)return;
     auto pair=scan_.pairs[index];leftInfo_->setText(metadata(pair.original));rightInfo_->setText(metadata(pair.conflict));
     leftInfo_->setToolTip(pair.original.path+"\nSHA-256 "+pair.original.sha256.toHex());
     rightInfo_->setToolTip(pair.conflict.path+"\nSHA-256 "+pair.conflict.sha256.toHex());
     busy_=true;centralWidget()->setEnabled(false);
-    auto previews=work<QPair<Preview,Preview>>(this,"Verifying preview hashes…",[&](const Options&o){return qMakePair(preview(pair.original,1024*1024,o),preview(pair.conflict,1024*1024,o));});
+    auto previews=work<QPair<Preview,Preview>>(this,"Verifying preview hashes…",[&](const Options&o){return qMakePair(preview(pair.original,inlinePreviewBytes,o),preview(pair.conflict,inlinePreviewBytes,o));});
     busy_=false;centralWidget()->setEnabled(true);
     if(!previews.first.error.isEmpty() || !previews.second.error.isEmpty()) {diff_->setPlainText(previews.first.error+"\n"+previews.second.error+"\nReopen the folder to scan again.");review_->setEnabled(false);external_->setEnabled(false);return;}
     QString left,right;bool leftIsText=textContent(previews.first.bytes,&left),rightIsText=textContent(previews.second.bytes,&right);
     auto render=[&](const Preview &p,bool isText,const QString &text,QPlainTextEdit *edit,QLabel *img) {
-        if(isText){edit->setLineWrapMode(QPlainTextEdit::NoWrap);edit->setPlainText(text+(p.truncated?"\n[Preview truncated at 1 MiB]":""));return;}
+        if(isText){edit->setLineWrapMode(QPlainTextEdit::NoWrap);edit->setPlainText((p.truncated?"[Partial preview: first 1 MiB only; remaining content is not shown.]\n\n":"")+text);return;}
         // Decode only a bounded image; malformed/huge inputs fall back to metadata.
         QBuffer buffer;buffer.setData(p.bytes);buffer.open(QIODevice::ReadOnly);QImageReader reader(&buffer);QImageReader::setAllocationLimit(32);
         QSize size=reader.size();
@@ -190,7 +192,25 @@ void Workbench::showPair() {
         edit->setPlainText("Binary or unsupported text encoding.\n\nUse metadata or an external viewer to inspect it, then choose a decision explicitly.\n\nNo automatic winner is inferred from size or date.");
     };
     render(previews.first,leftIsText,left,leftText_,leftImage_);render(previews.second,rightIsText,right,rightText_,rightImage_);
-    diff_->setPlainText(leftIsText&&rightIsText ? lineDiff(left,right) : "A text diff is unavailable for this pair. Review the images or metadata and choose explicitly.");
+    const bool partial=previews.first.truncated || previews.second.truncated;
+    QString scope;
+    if(partial) {
+        scope="Partial preview: at least one file exceeds 1 MiB. Inline text difference is unavailable because remaining content is not shown. Review both complete files before deciding.";
+        diff_->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+        diff_->setPlainText(scope+"\n\nMatching visible text does not establish identical files. Use External diff for complete snapshots up to 16 MiB per file, or inspect larger files in a trusted viewer.");
+    } else if(leftIsText && rightIsText) {
+        const bool tooManyLines=left.count('\n')>=1200 || right.count('\n')>=1200;
+        scope=tooManyLines ? "Complete text previews are available. Inline text difference is unavailable above 1,200 lines per version; review Versions or use External diff."
+                           : "Text previews and inline text difference cover both complete files.";
+        diff_->setLineWrapMode(QPlainTextEdit::NoWrap);
+        diff_->setPlainText(lineDiff(left,right));
+    } else {
+        scope="Text comparison is unavailable for this pair. Review the images or metadata and choose explicitly.";
+        diff_->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+        diff_->setPlainText("A text diff is unavailable for this pair. Review the images or metadata and choose explicitly.");
+    }
+    scope += pair.original.sha256==pair.conflict.sha256 ? " Whole-file SHA-256 hashes are identical." : " Whole-file SHA-256 hashes differ.";
+    comparisonScope_->setText(scope);comparisonScope_->show();
 }
 QString Workbench::chooseBackup() {
     if(!backupRoot_.isEmpty())return backupRoot_;
@@ -201,6 +221,7 @@ void Workbench::review() {
     Plan p=plan(scan_.pairs[index],Action(action_->currentIndex()),backup);
     if(!p.error.isEmpty()){QMessageBox::warning(this,"Plan unavailable",p.error);backupRoot_.clear();return;}
     QDialog dialog(this);dialog.setWindowTitle("Review transaction plan");dialog.setObjectName("planDialog");dialog.resize(720,540);auto *layout=new QVBoxLayout(&dialog);
+    auto *scope=label(comparisonScope_->text()+"\nThis decision applies to the whole files, including any content not displayed.");scope->setObjectName("planComparisonScope");scope->setAccessibleName("Plan comparison scope");layout->addWidget(scope);
     auto *text=editor("Transaction plan");text->setPlainText(p.description+"\n\nOriginal: "+p.pair.original.path+"\nConflict: "+p.pair.conflict.path+"\nBackup folder: "+p.backupRoot+(p.keepBothPath.isEmpty()?"":"\nKeep-both destination: "+p.keepBothPath)+"\n\nOriginal SHA-256: "+p.pair.original.sha256.toHex()+"\nConflict SHA-256: "+p.pair.conflict.sha256.toHex()+"\n\nOnly this selected conflict is resolved. Other versions remain.\nThis operation has recorded stages, not an atomic multi-file guarantee. On interruption, use History / recovery.");layout->addWidget(text);
     auto *paused=new QCheckBox("I paused Syncthing for this folder and closed all other file writers.");paused->setObjectName("pauseAcknowledgment");layout->addWidget(paused);
     auto *privateBackup=new QCheckBox("The backup folder is private, local, and outside ALL synced folders.");privateBackup->setObjectName("backupAcknowledgment");layout->addWidget(privateBackup);

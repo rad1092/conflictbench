@@ -15,6 +15,10 @@ In both cases `execute()` must report failure, never `committed`. Original and c
 
 This is a real Linux capacity failure test, not evidence of Windows/macOS disk-full behavior or of whole-transaction atomicity. It does not simulate power loss, physical media faults, inode exhaustion, quotas, or hostile concurrent writers. Other safety and crash tests cover their explicitly named cases. The helper's native fill records errno; Qt's returned error text is recorded independently, since diagnostic strings may differ by Qt version. The original backup and durable-stage assertions ensure an unrelated early failure cannot pass.
 
+## Observed CI evidence
+
+The Ubuntu 24.04 job for commit `bebe83e50f31002bdc2d29c4e414bd5b65e0761c` passed both scenarios on 2026-10-08. Its [public job log](https://github.com/rad1092/conflictbench/actions/runs/37718776547/job/113121421731) records a 2,097,152-byte tmpfs, native errno 28, zero available bytes before reserving headroom, and `diskfull_suite_passed` with two scenarios. Backup and destination failures retained `backing_up` and `writing_destination`, respectively; both recovered to `undone` with unchanged source witnesses. This records the disk-full step specifically: the overall job later failed its separate clean-container smoke because GLib was missing from the documented runtime dependency list.
+
 ## Build and CI integration
 
 Inside the existing `if(BUILD_TESTING)` block, add a Linux-only helper target:

@@ -8,20 +8,20 @@ used.
 
 | Run | Result | Duration |
 | --- | --- | --- |
-| Native Cocoa, default scale | 12 passed, 0 failed, 0 skipped | 3.220 s |
-| Native Cocoa, `QT_SCALE_FACTOR=2` | 12 passed, 0 failed, 0 skipped | 3.654 s |
-| Offscreen regression | 12 passed, 0 failed, 0 skipped | 0.705 s |
+| Native Cocoa, default scale | 13 passed, 0 failed, 0 skipped | 6.279 s |
+| Native Cocoa, `QT_SCALE_FACTOR=2` | 13 passed, 0 failed, 0 skipped | 4.529 s |
+| Offscreen regression | 13 passed, 0 failed, 0 skipped | 0.846 s |
 
 The count includes QtTest initialization and cleanup. These are working-tree
-checks based on `e2b76e148443dd878efa4ae5d3d6e365413924e0` plus the GUI harness,
-UI, and core fixes under review; the release workflow must verify the final
-commit separately. The final local run was at 02:35 UTC with source SHA-256:
+checks based on `bebe83e50f31002bdc2d29c4e414bd5b65e0761c` plus the partial-preview
+safety UI fix under review; the release workflow must verify the final
+commit separately. The final local run was at 02:48 UTC with source SHA-256:
 
 | Source | SHA-256 |
 | --- | --- |
-| `src/core.cpp` | `33a0e91233d095f1f198013ae96fb0036f27f6fd9c23d557e9deed46e3c080c7` |
-| `src/workbench.cpp` | `3c6ab122d4dfe5cc4240d26f40fa0ea4916d775ab04471f40f2c661db8964444` |
-| `tests/gui_tests.cpp` | `8bc4f992fdca55be10936f2fe67fd683daae2d0f2959fb60bf80976353094dc1` |
+| `src/core.cpp` | `d9480a90a79e1046eac34dac885abe545853e4aada585108c14bb54fac5819fc` |
+| `src/workbench.cpp` | `963cc2d9a158bb28943f7d1de117a0ba47b9110b4b399dbeb41dea625988501a` |
+| `tests/gui_tests.cpp` | `7a039467645fb37bcf756d12d858aa1eeee7453e0b64e51dc19465821454fa99` |
 
 The accompanying screenshot files preserve the result of this run, not a claim
 about later builds.
@@ -41,6 +41,14 @@ path, and checks that review remains enabled. This covers the stale selection
 index found when Linux sorted the Korean filename last; it does not rely on an
 OS-specific filename sort order.
 
+A partial-preview regression uses equal-size files with an identical 1 MiB
+prefix and different `OLD` / `NEW` tails. The prefix has only 1,024 newlines,
+so the independent 1,200-line limit cannot conceal the byte-limit regression.
+The test checks that inline diff is refused, the whole-file hashes differ,
+both tabs retain a visible scope warning, and the final plan explicitly says
+the decision affects undisplayed content. Cancel preserves all source and
+backup directory hashes and creates no receipt.
+
 ## Captures
 
 The optional `CB_GUI_CAPTURE_DIR` environment variable saves only a synthetic
@@ -54,11 +62,15 @@ no images. Each capture logs its pixel size and device pixel ratio.
 - [Plan and initially disabled commit](screenshots/cocoa-plan.png): 720 × 540, DPR 1.
 - [Committed receipt and disabled undo](screenshots/cocoa-history.png): 850 × 520, DPR 1.
 - [Text at Qt scale factor 2](screenshots/cocoa-text-scale2.png): 1920 × 1200, DPR 2.
+- [Partial preview cannot imply a complete comparison](screenshots/cocoa-partial-text-difference.png): 1180 × 820, DPR 1.
+- [Partial scope remains visible in the final plan](screenshots/cocoa-partial-plan.png): 720 × 540, DPR 1.
 
-All six refreshed captures were visually inspected. Both image versions now fit
+All eight refreshed captures were visually inspected. Both image versions now fit
 inside their preview panes; binary guidance wraps and is fully readable; long
 metadata filenames are deliberately elided with the full value in a tooltip.
-Long plan paths remain horizontally scrollable. The scale-2 run
+Long plan paths remain horizontally scrollable. The comparison-scope label fits
+below both tabs and above the plan contents, including with partial previews.
+The scale-2 run
 reported Qt window-placement warnings when a requested logical window exceeded
 the available screen area, but all workflow assertions passed. This checks
 Qt's scaled rendering and interaction, not moving a physical window between

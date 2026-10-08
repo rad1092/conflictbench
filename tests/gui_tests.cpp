@@ -106,6 +106,7 @@ struct ReviewObservation {
     bool sawInformation = false;
     bool captureSaved = true;
     QString planText;
+    QString comparisonScope;
     QStringList messages;
 };
 
@@ -136,10 +137,13 @@ ReviewObservation driveReview(Workbench &window, bool commit,
         auto *privateBackup = dialog->findChild<QCheckBox *>("backupAcknowledgment");
         auto *button = dialog->findChild<QPushButton *>("commit");
         auto *planText = dialog->findChild<QPlainTextEdit *>("Transaction plan");
-        observed.controlsPresent = paused && privateBackup && button && planText;
+        auto *scope = dialog->findChild<QLabel *>("planComparisonScope");
+        observed.controlsPresent = paused && privateBackup && button && planText && scope && scope->isVisible();
         if (!observed.controlsPresent) { dialog->reject(); return; }
         observed.planText = planText->toPlainText();
-        observed.captureSaved = captureSyntheticWidget(*dialog, "plan");
+        observed.comparisonScope = scope->text();
+        observed.captureSaved = captureSyntheticWidget(*dialog,
+            scope->text().startsWith("Partial preview") ? "partial-plan" : "plan");
         observed.initialDisabled = !button->isEnabled();
         paused->setChecked(true);
         observed.pauseOnlyDisabled = !button->isEnabled();
@@ -387,6 +391,58 @@ private slots:
         QVERIFY(named<QPlainTextEdit>(window, "Text difference")->toPlainText()
                     .contains("Reopen the folder to scan again"));
         QCOMPARE(contents(original), bytes);
+    }
+
+    void truncatedTextNeverPresentsMatchingPrefixAsCompleteDifference() {
+        Workbench window;
+        window.show();
+        window.createDemo();
+        const QString root = demoRoot(window);
+        const QString original = QDir(root).filePath(QString::fromUtf8("여행 계획.txt"));
+        const QString conflict = QDir(root).filePath(
+            QString::fromUtf8("여행 계획.sync-conflict-20261001-091530-ABCDEFG.txt"));
+        QByteArray sharedPrefix(1024 * 1024, 'a');
+        // The prefix has fewer than 1,200 lines, so the line-count diff limit
+        // cannot hide a regression in the independent 1 MiB byte limit.
+        for (int i = 1023; i < sharedPrefix.size(); i += 1024) sharedPrefix[i] = '\n';
+        QVERIFY(overwrite(original, sharedPrefix + "OLD\n"));
+        QVERIFY(overwrite(conflict, sharedPrefix + "NEW\n"));
+        const auto before = directorySnapshot(QFileInfo(root).dir().absolutePath());
+        window.scanFolder(root);
+        auto *tree = named<QTreeWidget>(window, "conflicts");
+        auto *selected = version(window, QString::fromUtf8("여행 계획.txt"));
+        QVERIFY(tree && selected);
+        tree->setCurrentItem(selected);
+        auto *left = named<QPlainTextEdit>(window, "Original text preview");
+        auto *right = named<QPlainTextEdit>(window, "Conflict text preview");
+        auto *diff = named<QPlainTextEdit>(window, "Text difference");
+        auto *scope = named<QLabel>(window, "comparisonScope");
+        QVERIFY(left && right && diff && scope);
+        QVERIFY(left->toPlainText().startsWith("[Partial preview: first 1 MiB"));
+        QVERIFY(right->toPlainText().startsWith("[Partial preview: first 1 MiB"));
+        QVERIFY(!left->toPlainText().contains("OLD"));
+        QVERIFY(!right->toPlainText().contains("NEW"));
+        QVERIFY(diff->toPlainText().contains("Inline text difference is unavailable"));
+        QVERIFY(diff->toPlainText().contains("remaining content is not shown"));
+        QVERIFY(!diff->toPlainText().contains("--- original"));
+        QVERIFY(scope->isVisible());
+        QVERIFY(scope->text().contains("Partial preview"));
+        QVERIFY(scope->text().contains("Whole-file SHA-256 hashes differ"));
+        auto *tabs = window.findChild<QTabWidget *>();
+        QVERIFY(tabs);
+        tabs->setCurrentWidget(diff);
+        QVERIFY(diff->isVisible() && scope->isVisible());
+        QVERIFY(captureSyntheticWidget(window, "partial-text-difference"));
+
+        const auto observed = driveReview(window, false);
+        QVERIFY(!observed.timedOut && observed.sawPlan && observed.controlsPresent);
+        QVERIFY(observed.captureSaved);
+        QVERIFY(observed.comparisonScope.contains("Partial preview"));
+        QVERIFY(observed.comparisonScope.contains("1 MiB"));
+        QVERIFY(observed.comparisonScope.contains("Whole-file SHA-256 hashes differ"));
+        QVERIFY(observed.comparisonScope.contains("decision applies to the whole files"));
+        QCOMPARE(directorySnapshot(QFileInfo(root).dir().absolutePath()), before);
+        QVERIFY(history(demoBackups(root)).isEmpty());
     }
 
     void committingLastScanEntryRescansWithoutStaleSelection() {

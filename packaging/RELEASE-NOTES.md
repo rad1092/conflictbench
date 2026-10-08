@@ -15,3 +15,7 @@ The source archive and exact, unmodified Qtbase 6.11.2 corresponding source are
 provided alongside the binaries. GPL/LGPL and third-party notices are included.
 CI tests synthetic data; they do not establish safety for every filesystem or
 recreate subsequent changes made by other devices.
+
+The verification manifest links the exact release workflow. The verification
+log archive preserves core/GUI tests, actual Linux disk-full recovery evidence,
+and the secret/dependency reports beyond temporary CI artifact retention.

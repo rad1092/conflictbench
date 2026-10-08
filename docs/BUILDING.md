@@ -4,8 +4,9 @@ ConflictBench is a C++17 / Qt Widgets application. The application has no Python
 runtime dependency; the Python scripts below only assemble and verify releases.
 Use CMake 3.24 or newer, a C++17 compiler, and shared Qt Core, Gui, Widgets,
 Concurrent, and Test. CMake accepts Qt 6.8 or newer. Release packages pin Qt
-**6.11.2**, the current stable patch selected for this release, to include its
-security and quality fixes. See [Qt's release announcement](https://www.qt.io/blog/qt-6.11.2-released).
+**6.11.2**, the selected 6.11 patch release, to include its security and quality
+fixes. See [Qt's release announcement](https://www.qt.io/blog/qt-6.11.2-released).
+This is an exact dependency pin, not a claim to ship the newest Qt minor series.
 
 ## Build
 
@@ -101,6 +102,8 @@ and tests an extracted application. The Linux job additionally launches the
 archive in a clean container with only documented system dependencies. Logs,
 packages, source notices, and secret-scan results are retained as CI artifacts.
 The Gitleaks binary has a fixed version and independently checked SHA-256.
+The single reviewed historical prose false positive has an exact fingerprint
+exception, documented in [SECRET-SCAN-REVIEW](SECRET-SCAN-REVIEW.md).
 Dependency checks enforce pinned actions, source hashes, and module scope, and
 query the public OSV database for advisories mapped to the exact Qtbase and ICU
 source commits. Results retain the query and check date. OSV's commit coverage
@@ -115,6 +118,11 @@ contains three platform archives, full application source for that exact commit,
 unmodified Qtbase corresponding source, manifests, and `SHA256SUMS`. Review the
 draft and checksums before publishing. A failed platform prevents release
 assembly. No signing credentials are requested or stored.
+
+Release assets also preserve the small core/GUI logs, actual ENOSPC evidence,
+redacted secret-scan result and dependency report, with a verification manifest
+linking the exact workflow. This keeps the supporting evidence available after
+temporary CI artifacts expire.
 
 Test-generated folders and caches are ignored. Delete `build/`, `package-work/`,
 `release-sources/`, and `dist/` after preserving the small reports and published

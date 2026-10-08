@@ -122,12 +122,16 @@ def package(args):
             for path in app.rglob("*"):
                 if path.is_file() and not path.is_symlink() and (path.suffix in {".dylib", ""}):
                     result = subprocess.run(["otool", "-L", str(path)], capture_output=True, text=True)
-                    if result.returncode == 0 and re.search(r"/(?:opt/homebrew|usr/local|Users|Applications/Qt)/", result.stdout):
+                    # otool prints the input's absolute path as a header, including
+                    # for non-object resources. Only indented dependency records
+                    # describe load paths that must be relocatable.
+                    if result.returncode == 0 and re.search(r"^[ \t]+/(?:opt/homebrew|usr/local|Users|Applications/Qt)/", result.stdout, re.MULTILINE):
                         raise RuntimeError(f"Nonrelocatable dependency: {path}\n{result.stdout}")
     elif system == "Windows":
         executable = stage / "bin" / "ConflictBench.exe"
         plugins = copy_plugins(qt_plugins, stage / "bin", system)
         run(qt_bin / "windeployqt.exe", "--release", "--no-plugins", "--no-translations", "--no-compiler-runtime",
+            "--skip-plugin-types", "generic,networkinformation,tls",
             "--no-system-d3d-compiler", "--no-system-dxc-compiler", "--no-opengl-sw", "--no-ffmpeg",
             "--dir", stage / "bin", executable, *plugins)
         vswhere = Path(os.environ["ProgramFiles(x86)"]) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe"

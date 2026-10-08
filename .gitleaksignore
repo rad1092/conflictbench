@@ -1,0 +1,4 @@
+# Reviewed prose false positive: missing native API / failed query explanation.
+# This exact historic finding only; no rule, path, or current-content exclusion.
+# See docs/SECRET-SCAN-REVIEW.md.
+bebe83e50f31002bdc2d29c4e414bd5b65e0761c:docs/FINAL-SAFETY-REVIEW.md:generic-api-key:34

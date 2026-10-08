@@ -31,7 +31,7 @@ private:
     std::unique_ptr<QTemporaryDir> demo_;
     QTreeWidget *tree_;
     QPlainTextEdit *leftText_, *rightText_, *diff_;
-    QLabel *leftInfo_, *rightInfo_, *leftImage_, *rightImage_, *folder_, *status_;
+    QLabel *leftInfo_, *rightInfo_, *leftImage_, *rightImage_, *folder_, *status_, *comparisonScope_;
     QTabWidget *tabs_;
     QComboBox *action_;
     QPushButton *review_, *external_;

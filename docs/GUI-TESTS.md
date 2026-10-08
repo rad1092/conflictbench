@@ -28,6 +28,10 @@ Covered behavior:
 - A same-size edit after scanning invalidates the preview and disables review
   and external diff. A same-size edit while the plan is open is rejected at
   commit, preserves the changed original, and leaves all conflicts unresolved.
+- Equal-size files with the same first 1 MiB and different tails cannot appear
+  completely compared: truncated text refuses inline diff, warns above the
+  decision controls and final plan, and reports different whole-file hashes.
+  Cancelling that plan preserves every source and backup hash.
 - Opening a second synthetic sync folder after the demo requires a new backup
   selection. It cannot silently reuse the demo's disposable backup directory.
 - Selecting a synthetic non-executable file as the external tool reports launch
