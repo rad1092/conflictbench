@@ -9,6 +9,7 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import zipfile
@@ -223,6 +224,10 @@ def package(args):
 
 
 if __name__ == "__main__":
+    # Windows redirected consoles can default to a legacy code page. Keep
+    # Unicode installation-path evidence printable without changing file paths.
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build", type=Path, default=ROOT / "build")
     parser.add_argument("--qt", type=Path, required=True, help="The Qt architecture prefix, containing bin/qmake")
