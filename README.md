@@ -14,6 +14,10 @@ Download your platform package from [Releases](https://github.com/rad1092/confli
 
 Choose **Try demo** for disposable text, Korean Unicode, image, and binary examples. Demo files and backups are removed when the application closes. To preserve real work, use your own selected folder and a separate private backup location.
 
+For a first session, follow [a complete demo decision and recovery](docs/FIRST-RUN.md)
+before selecting a real synced folder. It includes the expected result and
+common reasons a commit is refused.
+
 1. **Open folder** scans only the folder you choose. Scanning does not alter its files.
 2. Select a conflict under its original. Inspect **Versions** and **Text difference**.
 3. Choose **Keep original**, **Use conflict**, or **Keep both**. Each decision resolves only the selected conflict version.
