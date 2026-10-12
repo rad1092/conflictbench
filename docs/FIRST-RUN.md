@@ -36,8 +36,16 @@ simply restoring local bytes. See [Safety](SAFETY.md).
 | Preview is partial | Read its size/line-limit notice. Matching visible prefixes do not prove identical files. |
 | Files changed / rescan required | Leave the files alone, pause writers and scan again. Approve the newly reviewed hashes. |
 | Backup rejected | Use a private local directory outside every sync root, including when scanning a subfolder. |
-| Transaction lock unavailable | Close another active ConflictBench transaction and verify local temporary-directory permissions. Do not delete a live lock to force progress. |
+| Transaction lock unavailable | Close another active ConflictBench transaction and check your per-user application-data directory's `conflictbench-locks` permissions and ownership (locations below). Do not delete a live lock to force progress. |
 | Recovery refuses changed files | Preserve the receipt and backups; inspect the later changes. Recovery deliberately refuses to overwrite an unrecognized state. |
+
+The transaction lock is `conflictbench-locks/transactions.lock` under Qt's
+[`GenericDataLocation`](https://doc.qt.io/qt-6/qstandardpaths.html). Normally this is `~/Library/Application Support` on
+macOS, `%LOCALAPPDATA%` on Windows, and `$XDG_DATA_HOME` (or `~/.local/share`
+when unset) on Linux. Custom environments can change the base path. The lock
+directory is private to the current user; checking the temporary directory
+does not diagnose this lock. If permissions are managed by your organization,
+have its administrator inspect the actual application-data location.
 
 ## Reproduced public-package check
 
