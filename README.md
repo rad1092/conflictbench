@@ -6,7 +6,7 @@ A local desktop workbench for reviewing Syncthing conflict files before resolvin
 
 No account, Syncthing API key, daemon, telemetry, or automatic winner. ConflictBench is independent of the Syncthing project.
 
-![ConflictBench native macOS demo](docs/screenshots/cocoa-text.png)
+![ConflictBench comparing two versions of a Korean-named file, with changed lines highlighted](docs/screenshots/xcb-text.png)
 
 ## Start
 
@@ -19,13 +19,17 @@ before selecting a real synced folder. It includes the expected result and
 common reasons a commit is refused.
 
 1. **Open folder** scans only the folder you choose. Scanning does not alter its files.
-2. Select a conflict under its original. Inspect **Versions** and **Text difference**.
+2. Select a conflict under its original. Each one is labelled with the date, time and device from its Syncthing name, for example *Conflict · 10/1/26 09:15 · device ABCDEFG*. **Versions** shows both files side by side with changed lines highlighted: red only in the original, green only in the conflict.
 3. Choose **Keep original**, **Use conflict**, or **Keep both**. Each decision resolves only the selected conflict version.
 4. Choose an existing private backup folder outside **every** synced folder. Pause Syncthing for the selected folder and close other programs writing those files.
-5. **Review plan** displays the affected paths and hashes. Check both acknowledgments to enable commit.
+5. **Review plan** says in one sentence what will happen, for example *Keep 여행 계획.txt. The conflict copy moves to the backup folder.* Full paths and SHA-256 are one click away. Check both acknowledgments to enable commit.
 6. Verify the result before resuming synchronization. **History / recovery** opens your backup folder and can restore recognized local states.
 
-[한국어 빠른 시작](docs/QUICKSTART.ko.md) · [Safety and recovery](docs/SAFETY.md) · [Backup format](docs/BACKUP-FORMAT.md) · [Privacy](docs/PRIVACY.md) · [Support](SUPPORT.md)
+Conflict copies whose content is byte-for-byte the same as their original are marked *identical*. **Clean up identical copies** archives all of them in one reviewed step, each with its own receipt, so a folder with dozens of leftover copies does not need dozens of dialogs.
+
+The interface follows the system language. Korean is included; `ConflictBench --language en` forces English.
+
+[한국어 빠른 시작](docs/QUICKSTART.ko.md) · [Safety and recovery](docs/SAFETY.md) · [Backup format](docs/BACKUP-FORMAT.md) · [Privacy](docs/PRIVACY.md) · [Support](SUPPORT.md) · [Verification records](docs/VERIFICATION.md)
 
 ## What the decisions do
 

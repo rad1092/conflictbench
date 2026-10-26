@@ -66,7 +66,7 @@ jobs:
           - os: macos-15
             architecture: arm64
             qt_arch: clang_64
-            qt_archives: qtbase qttools
+            qt_archives: qtbase qtdeclarative qttools
             configure: '-G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0'
           - os: windows-2022
             architecture: x86_64
@@ -76,7 +76,7 @@ jobs:
           - os: ubuntu-24.04
             architecture: x86_64
             qt_arch: linux_gcc_64
-            qt_archives: qtbase qttools icu
+            qt_archives: qtbase qtdeclarative qttools icu
             configure: '-G Ninja -DCMAKE_BUILD_TYPE=Release'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
@@ -102,7 +102,9 @@ jobs:
           aqtversion: '==3.3.0'
           py7zrversion: '==1.1.0'
           cache: true
-          cache-key-prefix: conflictbench-qt-base-only
+          # lrelease (Qt Linguist) loads QtQml at run time, so the build needs
+          # the qtdeclarative archive even though the app does not use QML.
+          cache-key-prefix: conflictbench-qt-base-linguist
       - name: Install Linux test display and desktop libraries
         if: runner.os == 'Linux'
         run: |
