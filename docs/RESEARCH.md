@@ -29,7 +29,7 @@ The bounded target is a person with accumulated conflicts across arbitrary local
 
 The experiment ran on macOS arm64 with Python 3.14.6. Every file was generated under a `TemporaryDirectory`; no real user or synced directory was read or mutated. All test directories were automatically removed. The downloaded competitor was **not launched as a GUI**, installed, or modified.
 
-The [harness](reproduce_deconflicter.py) verifies the complete upstream source's SHA-256, extracts the unchanged `scan_conflicts`, `accept_version`, and `accept_and_cleanup` method bodies through Python's AST, then executes those bodies. Only GUI message boxes, list widgets, and post-action screen refresh callbacks are stubbed. The binary scenario reproduces the exact UTF-8 replacement/split/join pipeline used by its preview; it does not exercise QScintilla rendering. These are action-level results, not a complete end-to-end usability test.
+The [harness](evidence/reproduce_deconflicter.py) verifies the complete upstream source's SHA-256, extracts the unchanged `scan_conflicts`, `accept_version`, and `accept_and_cleanup` method bodies through Python's AST, then executes those bodies. Only GUI message boxes, list widgets, and post-action screen refresh callbacks are stubbed. The binary scenario reproduces the exact UTF-8 replacement/split/join pipeline used by its preview; it does not exercise QScintilla rendering. These are action-level results, not a complete end-to-end usability test.
 
 Pinned upstream source: [`deconflicter.py` at 47438c05f7ad949b8062cdba2324c53d23efb638](https://github.com/cmprmsd/syncthing-deconflicter/blob/47438c05f7ad949b8062cdba2324c53d23efb638/deconflicter.py). SHA-256: `e89de4fcb7fb207c53d9193dfcc8a03d81499523c388e9f9b8a924fa6035dc54`.
 
@@ -43,13 +43,13 @@ Pinned upstream source: [`deconflicter.py` at 47438c05f7ad949b8062cdba2324c53d23
 | Extensionless `README` plus matching conflict | Scanner groups the conflict as its own original instead of grouping `README`. | Parse the supported naming grammar, including extensionless files, and reject ambiguous matches. |
 | Original is a symlink to a sibling outside the selected folder | Scanner includes it; acceptance overwrites the symlink target. | Reject symlink/reparse-point paths and escapes at scan and operation boundaries. |
 
-Machine-readable observations, source hash, and runtime are in [deconflicter-evidence.json](deconflicter-evidence.json). These findings are not allegations that the existing project promises this safety model. They explain why a different workflow can be useful.
+Machine-readable observations, source hash, and runtime are in [deconflicter-evidence.json](evidence/deconflicter-evidence.json). These findings are not allegations that the existing project promises this safety model. They explain why a different workflow can be useful.
 
 To reproduce from the repository root with Python 3 on a host that permits symlinks:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/cmprmsd/syncthing-deconflicter/47438c05f7ad949b8062cdba2324c53d23efb638/deconflicter.py -o /tmp/deconflicter-pinned.py
-python3 docs/reproduce_deconflicter.py /tmp/deconflicter-pinned.py
+python3 docs/evidence/reproduce_deconflicter.py /tmp/deconflicter-pinned.py
 ```
 
 The harness deliberately refuses different source bytes. It has no PyQt dependency and does not download or run any GUI package. Remove the downloaded `/tmp/deconflicter-pinned.py` after use. Upstream code is linked and fetched by the reviewer; no upstream implementation is bundled in this repository.

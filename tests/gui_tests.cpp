@@ -29,7 +29,7 @@ QTreeWidgetItem *version(Workbench &window, const QString &original) {
 
 QString demoRoot(Workbench &window) {
     auto *label = named<QLabel>(window, "folderPath");
-    return label ? label->text() : QString{};
+    return label ? label->property("fullPath").toString() : QString{};
 }
 
 QString demoBackups(const QString &root) {
@@ -558,6 +558,68 @@ private slots:
         QVERIFY(!reusedDisposableBackup);
         QCOMPARE(directorySnapshot(secondRoot), before);
         QCOMPARE(directorySnapshot(oldDemo), demoBefore);
+    }
+
+    void identicalCopiesAreArchivedTogether() {
+        Workbench window;
+        window.show();
+        window.createDemo();
+        const QString root = demoRoot(window);
+        QVERIFY(!root.isEmpty());
+        QVERIFY(overwrite(root + "/notes.txt", "same words\n"));
+        QVERIFY(overwrite(root + "/notes.sync-conflict-20261002-101500-ABCDEFG.txt", "same words\n"));
+        const QByteArray budget = contents(root + "/budget.v2.dat");
+        QVERIFY(overwrite(root + "/budget.v2.sync-conflict-20261003-081000-LAPTOPQ.dat", budget));
+        window.scanFolder(root);
+        auto *clean = named<QPushButton>(window, "cleanIdentical");
+        QVERIFY(clean && clean->isEnabled());
+        QVERIFY2(clean->text().contains("2"), qPrintable(clean->text()));
+        auto *tree = named<QTreeWidget>(window, "conflicts");
+        bool labelled = false;
+        for (QTreeWidgetItemIterator item(tree); *item; ++item)
+            labelled |= (*item)->text(0).contains("device LAPTOPQ") && (*item)->text(0).contains("identical");
+        QVERIFY(labelled);
+
+        bool sawBatch = false, rows = false, initiallyDisabled = false, sawDone = false, timedOut = false;
+        QStringList messages;
+        QTimer timer;
+        QElapsedTimer elapsed;
+        elapsed.start();
+        connect(&timer, &QTimer::timeout, &window, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            if (elapsed.elapsed() > 15000) { timedOut = true; if (dialog) dialog->reject(); return; }
+            if (auto *message = qobject_cast<QMessageBox *>(dialog)) {
+                messages << message->windowTitle() + ": " + message->text();
+                sawDone |= message->icon() == QMessageBox::Information;
+                message->accept();
+            } else if (dialog && dialog->objectName() == "batchDialog" && !sawBatch) {
+                sawBatch = true;
+                auto *list = dialog->findChild<QTreeWidget *>("batchList");
+                auto *paused = dialog->findChild<QCheckBox *>("pauseAcknowledgment");
+                auto *privateBackup = dialog->findChild<QCheckBox *>("backupAcknowledgment");
+                auto *commit = dialog->findChild<QPushButton *>("commit");
+                if (!list || !paused || !privateBackup || !commit) { dialog->reject(); return; }
+                rows = list->topLevelItemCount() == 2;
+                initiallyDisabled = !commit->isEnabled();
+                paused->setChecked(true);
+                privateBackup->setChecked(true);
+                commit->click();
+            }
+        });
+        timer.start(5);
+        QTest::mouseClick(clean, Qt::LeftButton);
+        QTRY_VERIFY_WITH_TIMEOUT(sawDone || timedOut, 16000);
+        timer.stop();
+        QVERIFY(!timedOut);
+        QVERIFY(sawBatch && rows && initiallyDisabled);
+        QVERIFY2(sawDone, qPrintable(messages.join('\n')));
+        QVERIFY(!QFileInfo::exists(root + "/notes.sync-conflict-20261002-101500-ABCDEFG.txt"));
+        QVERIFY(!QFileInfo::exists(root + "/budget.v2.sync-conflict-20261003-081000-LAPTOPQ.dat"));
+        QCOMPARE(contents(root + "/notes.txt"), QByteArray("same words\n"));
+        QCOMPARE(contents(root + "/budget.v2.dat"), budget);
+        QCOMPARE(scan(root).pairs.size(), 3);
+        QCOMPARE(history(demoBackups(root)).size(), 2);
+        QVERIFY(!clean->isEnabled());
     }
 
     void externalToolFailureLeavesSourceUntouched() {

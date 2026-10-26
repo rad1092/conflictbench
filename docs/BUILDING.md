@@ -103,7 +103,7 @@ archive in a clean container with only documented system dependencies. Logs,
 packages, source notices, and secret-scan results are retained as CI artifacts.
 The Gitleaks binary has a fixed version and independently checked SHA-256.
 The single reviewed historical prose false positive has an exact fingerprint
-exception, documented in [SECRET-SCAN-REVIEW](SECRET-SCAN-REVIEW.md).
+exception, documented in [the secret scan review](VERIFICATION.md#secret-scan-review).
 Dependency checks enforce pinned actions, source hashes, and module scope, and
 query the public OSV database for advisories mapped to the exact Qtbase and ICU
 source commits. Results retain the query and check date. OSV's commit coverage
