@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 — unreleased
+## 0.2.0 — 2026-10-26
 
 - **Versions** highlights changed lines: red only in the original, green only in the conflict. The text difference tab uses the same colors.
 - Conflicts are labelled with the date, time and device from their Syncthing names, and marked *identical* when their content matches the original.
